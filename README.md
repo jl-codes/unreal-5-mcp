@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Unreal Engine](https://img.shields.io/badge/Unreal%20Engine-5.5%2B-orange)](https://www.unrealengine.com)
 [![Python](https://img.shields.io/badge/Python-3.12%2B-yellow)](https://www.python.org)
-[![Status](https://img.shields.io/badge/Status-Experimental-red)](https://github.com/chongdashu/unreal-mcp)
+[![Status](https://img.shields.io/badge/Status-Experimental-red)](https://github.com/jl-codes/unreal-5-mcp)
 
 </div>
 
@@ -147,9 +147,14 @@ Each client uses the same JSON format as shown in the example above.
 Simply place the configuration in the appropriate location for your MCP client.
 
 
-## License
+## 👤 Maintainer
+
+This repository is actively maintained by [Tony Loehr](https://github.com/jl-codes). For questions, issues, or feature requests, please open a GitHub issue on the [repository](https://github.com/jl-codes/unreal-5-mcp).
+
+## 🙏 Attribution
+
+Originally created by [@chongdashu](https://github.com/chongdashu). This fork maintains and extends the project with additional features, documentation improvements, and integration with the Cline MCP marketplace.
+
+## 📄 License
+
 MIT
-
-## Questions
-
-For questions, you can reach me on X/Twitter: [@chongdashu](https://www.x.com/chongdashu)

@@ -1,9 +1,15 @@
 [project]
 name = "unreal-mcp"
 version = "0.1.0"
-description = "Unreal MCP Server: A server for Unreal Engine integration via the Model Context Protocol (MCP)."
+description = "Unreal MCP Server: A server for Unreal Engine 5 integration via the Model Context Protocol (MCP). Optimized for Cline compatibility."
 readme = "README.md"
 requires-python = ">=3.10"
+authors = [
+  {name = "Tony Loehr", email = "turingxo@gmail.com"}
+]
+maintainers = [
+  {name = "Tony Loehr", email = "turingxo@gmail.com"}
+]
 dependencies = [
   "mcp[cli]>=1.4.1",
   "fastmcp>=0.2.0",
@@ -19,4 +25,4 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 # The main server script is a single-file module
-py-modules = ["unreal_mcp_server"] 
+py-modules = ["unreal_mcp_server"]
