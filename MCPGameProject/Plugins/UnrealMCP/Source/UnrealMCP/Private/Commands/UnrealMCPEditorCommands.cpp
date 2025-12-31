@@ -20,6 +20,15 @@
 #include "Subsystems/EditorActorSubsystem.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
+#include "AssetToolsModule.h"
+#include "IAssetTools.h"
+#include "Factories/FbxFactory.h"
+#include "Factories/FbxImportUI.h"
+#include "Factories/FbxStaticMeshImportData.h"
+#include "Factories/FbxSkeletalMeshImportData.h"
+#include "EditorAssetLibrary.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "UObject/SavePackage.h"
 
 FUnrealMCPEditorCommands::FUnrealMCPEditorCommands()
 {
@@ -73,6 +82,11 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleCommand(const FString& C
     else if (CommandType == TEXT("take_screenshot"))
     {
         return HandleTakeScreenshot(Params);
+    }
+    // Asset import commands
+    else if (CommandType == TEXT("import_asset"))
+    {
+        return HandleImportAsset(Params);
     }
     
     return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown editor command: %s"), *CommandType));
@@ -597,4 +611,151 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleTakeScreenshot(const TSh
     }
     
     return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to take screenshot"));
-} 
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleImportAsset(const TSharedPtr<FJsonObject>& Params)
+{
+    // Get required parameters
+    FString FilePath;
+    if (!Params->TryGetStringField(TEXT("file_path"), FilePath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'file_path' parameter"));
+    }
+
+    FString DestinationPath;
+    if (!Params->TryGetStringField(TEXT("destination_path"), DestinationPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'destination_path' parameter"));
+    }
+
+    // Get optional import type parameter
+    FString ImportType = TEXT("auto");
+    Params->TryGetStringField(TEXT("import_type"), ImportType);
+
+    // Validate file exists
+    if (!FPaths::FileExists(FilePath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("File not found: %s"), *FilePath));
+    }
+
+    // Get file extension
+    FString FileExtension = FPaths::GetExtension(FilePath).ToLower();
+    
+    // Validate supported formats
+    if (FileExtension != TEXT("fbx") && FileExtension != TEXT("obj") && FileExtension != TEXT("glb") && FileExtension != TEXT("gltf"))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unsupported file format: .%s"), *FileExtension));
+    }
+
+    // Create FBX factory for import
+    UFbxFactory* FbxFactory = NewObject<UFbxFactory>();
+    FbxFactory->AddToRoot(); // Prevent garbage collection during import
+    
+    // Configure import settings
+    FbxFactory->ImportUI = NewObject<UFbxImportUI>();
+    FbxFactory->ImportUI->bImportMaterials = true;
+    FbxFactory->ImportUI->bImportTextures = true;
+    FbxFactory->ImportUI->bImportAnimations = true;
+    
+    // Determine if this should be a skeletal or static mesh
+    bool bIsSkeletalMesh = false;
+    if (ImportType == TEXT("SkeletalMesh"))
+    {
+        bIsSkeletalMesh = true;
+    }
+    else if (ImportType == TEXT("StaticMesh"))
+    {
+        bIsSkeletalMesh = false;
+    }
+    else // auto-detect
+    {
+        // Default to static mesh for now, could add logic to detect skeleton in FBX
+        bIsSkeletalMesh = false;
+    }
+
+    FbxFactory->ImportUI->MeshTypeToImport = bIsSkeletalMesh ? FBXIT_SkeletalMesh : FBXIT_StaticMesh;
+    FbxFactory->ImportUI->bAutomatedImportShouldDetectType = (ImportType == TEXT("auto"));
+    
+    // Set import options based on mesh type
+    if (bIsSkeletalMesh)
+    {
+        FbxFactory->ImportUI->SkeletalMeshImportData->bImportMorphTargets = true;
+        FbxFactory->ImportUI->SkeletalMeshImportData->bUpdateSkeletonReferencePose = true;
+    }
+    else
+    {
+        FbxFactory->ImportUI->StaticMeshImportData->bCombineMeshes = true;
+        FbxFactory->ImportUI->StaticMeshImportData->bAutoGenerateCollision = true;
+    }
+
+    // Disable UI prompts
+    FbxFactory->ImportUI->bIsReimport = false;
+    FbxFactory->ImportUI->bAutomatedImportShouldDetectType = false;
+    FbxFactory->SetDetectImportTypeOnImport(false);
+
+    // Get asset tools
+    FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
+    IAssetTools& AssetTools = AssetToolsModule.Get();
+
+    // Prepare destination package path
+    FString AssetName = FPaths::GetBaseFilename(FilePath);
+    FString PackagePath = DestinationPath;
+    
+    // Ensure path starts with /Game
+    if (!PackagePath.StartsWith(TEXT("/Game")))
+    {
+        PackagePath = TEXT("/Game") / PackagePath;
+    }
+
+    UE_LOG(LogTemp, Display, TEXT("Importing asset: %s to %s"), *FilePath, *PackagePath);
+
+    // Import the asset
+    TArray<UObject*> ImportedObjects;
+    
+    // Use AssetTools to import
+    UObject* ImportedAsset = FbxFactory->ImportObject(
+        FbxFactory->ResolveSupportedClass(),
+        GEditor->GetEditorWorldContext().World()->GetOutermost(),
+        *AssetName,
+        RF_Public | RF_Standalone,
+        FilePath,
+        nullptr,
+        false // Warn about existing assets
+    );
+
+    // Clean up factory
+    FbxFactory->RemoveFromRoot();
+
+    if (ImportedAsset)
+    {
+        // Save the asset
+        FString PackageName = PackagePath / AssetName;
+        UPackage* Package = CreatePackage(*PackageName);
+        ImportedAsset->Rename(*AssetName, Package, REN_None);
+        ImportedAsset->MarkPackageDirty();
+        
+        // Notify asset registry
+        FAssetRegistryModule::AssetCreated(ImportedAsset);
+        
+        // Save package
+        FString PackageFileName = FPackageName::LongPackageNameToFilename(PackageName, FPackageName::GetAssetPackageExtension());
+        FSavePackageArgs SaveArgs;
+        SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+        SaveArgs.SaveFlags = SAVE_NoError;
+        
+        UPackage::SavePackage(Package, ImportedAsset, *PackageFileName, SaveArgs);
+
+        // Build success response
+        TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+        ResultObj->SetBoolField(TEXT("success"), true);
+        ResultObj->SetStringField(TEXT("asset_path"), PackageName);
+        ResultObj->SetStringField(TEXT("asset_name"), AssetName);
+        ResultObj->SetStringField(TEXT("asset_type"), ImportedAsset->GetClass()->GetName());
+        ResultObj->SetStringField(TEXT("source_file"), FilePath);
+
+        UE_LOG(LogTemp, Display, TEXT("Successfully imported asset: %s"), *PackageName);
+        return ResultObj;
+    }
+
+    return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to import asset from: %s"), *FilePath));
+}

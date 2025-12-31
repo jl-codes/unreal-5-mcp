@@ -20,6 +20,8 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/Pawn.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
 
 FUnrealMCPBlueprintCommands::FUnrealMCPBlueprintCommands()
 {
@@ -58,6 +60,10 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleCommand(const FString
     else if (CommandType == TEXT("set_static_mesh_properties"))
     {
         return HandleSetStaticMeshProperties(Params);
+    }
+    else if (CommandType == TEXT("set_skeletal_mesh_properties"))
+    {
+        return HandleSetSkeletalMeshProperties(Params);
     }
     else if (CommandType == TEXT("set_pawn_properties"))
     {
@@ -1033,6 +1039,93 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleSetStaticMeshProperti
     return ResultObj;
 }
 
+TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleSetSkeletalMeshProperties(const TSharedPtr<FJsonObject>& Params)
+{
+    // Get required parameters
+    FString BlueprintName;
+    if (!Params->TryGetStringField(TEXT("blueprint_name"), BlueprintName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'blueprint_name' parameter"));
+    }
+
+    FString ComponentName;
+    if (!Params->TryGetStringField(TEXT("component_name"), ComponentName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'component_name' parameter"));
+    }
+
+    // Find the blueprint
+    UBlueprint* Blueprint = FUnrealMCPCommonUtils::FindBlueprint(BlueprintName);
+    if (!Blueprint)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
+    }
+
+    // Find the component
+    USCS_Node* ComponentNode = nullptr;
+    for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+    {
+        if (Node && Node->GetVariableName().ToString() == ComponentName)
+        {
+            ComponentNode = Node;
+            break;
+        }
+    }
+
+    if (!ComponentNode)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Component not found: %s"), *ComponentName));
+    }
+
+    USkeletalMeshComponent* MeshComponent = Cast<USkeletalMeshComponent>(ComponentNode->ComponentTemplate);
+    if (!MeshComponent)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Component is not a skeletal mesh component"));
+    }
+
+    // Set skeletal mesh properties
+    if (Params->HasField(TEXT("skeletal_mesh")))
+    {
+        FString MeshPath = Params->GetStringField(TEXT("skeletal_mesh"));
+        USkeletalMesh* Mesh = Cast<USkeletalMesh>(UEditorAssetLibrary::LoadAsset(MeshPath));
+        if (Mesh)
+        {
+            MeshComponent->SetSkeletalMeshAsset(Mesh);
+        }
+    }
+
+    if (Params->HasField(TEXT("animation_mode")))
+    {
+        FString ModeStr = Params->GetStringField(TEXT("animation_mode"));
+        if (ModeStr == TEXT("Blueprint"))
+        {
+            MeshComponent->SetAnimationMode(EAnimationMode::AnimationBlueprint);
+        }
+        else if (ModeStr == TEXT("Asset"))
+        {
+            MeshComponent->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+        }
+    }
+
+    if (Params->HasField(TEXT("anim_class")))
+    {
+        FString AnimPath = Params->GetStringField(TEXT("anim_class"));
+        UClass* AnimClass = Cast<UClass>(UEditorAssetLibrary::LoadAsset(AnimPath));
+        if (AnimClass)
+        {
+            MeshComponent->SetAnimInstanceClass(AnimClass);
+        }
+    }
+
+    // Mark the blueprint as modified
+    FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("component"), ComponentName);
+    ResultObj->SetStringField(TEXT("blueprint"), BlueprintName);
+    return ResultObj;
+}
+
 TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleSetPawnProperties(const TSharedPtr<FJsonObject>& Params)
 {
     // Get required parameters
@@ -1157,4 +1250,4 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleSetPawnProperties(con
     ResponseObj->SetBoolField(TEXT("success"), bAnyPropertiesSet);
     ResponseObj->SetObjectField(TEXT("results"), ResultsObj);
     return ResponseObj;
-} 
+}

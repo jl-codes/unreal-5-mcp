@@ -702,8 +702,98 @@ bool FUnrealMCPCommonUtils::SetObjectProperty(UObject* Object, const FString& Pr
             }
         }
     }
+    else if (FObjectProperty* ObjectProp = CastField<FObjectProperty>(Property))
+    {
+        if (Value->Type == EJson::String)
+        {
+            FString AssetPath = Value->AsString();
+            UObject* Asset = UEditorAssetLibrary::LoadAsset(AssetPath);
+            if (Asset)
+            {
+                ObjectProp->SetObjectPropertyValue(PropertyAddr, Asset);
+                UE_LOG(LogTemp, Display, TEXT("Successfully set object property %s to asset at %s"), *PropertyName, *AssetPath);
+                return true;
+            }
+            else
+            {
+                OutErrorMessage = FString::Printf(TEXT("Failed to load asset at path: %s"), *AssetPath);
+                return false;
+            }
+        }
+        else
+        {
+            OutErrorMessage = TEXT("Object property requires a string path to an asset");
+            return false;
+        }
+    }
     
-    OutErrorMessage = FString::Printf(TEXT("Unsupported property type: %s for property %s"), 
+    // Fallback: try to set property from string value for unsupported types
+    if (Value->Type == EJson::String)
+    {
+        FString Result;
+        if (Property->ImportText_Direct(*Value->AsString(), PropertyAddr, Object, 0, Result))
+        {
+            UE_LOG(LogTemp, Display, TEXT("Imported text for property %s: %s"), *PropertyName, *Value->AsString());
+            return true;
+        }
+        OutErrorMessage = FString::Printf(TEXT("Failed to import text for property %s: %s"), *PropertyName, *Result);
+    }
+    else
+    {
+        OutErrorMessage = FString::Printf(TEXT("Unsupported property type: %s for property %s"), 
                                     *Property->GetClass()->GetName(), *PropertyName);
+    }
     return false;
-} 
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPCommonUtils::HandleSetActorProperty(const TSharedPtr<FJsonObject>& Params)
+{
+    FString ActorName;
+    if (!Params->TryGetStringField(TEXT("name"), ActorName))
+    {
+        return CreateErrorResponse(TEXT("Missing 'name' parameter"));
+    }
+
+    FString PropertyName;
+    if (!Params->TryGetStringField(TEXT("property_name"), PropertyName))
+    {
+        return CreateErrorResponse(TEXT("Missing 'property_name' parameter"));
+    }
+
+    if (!Params->HasField(TEXT("property_value")))
+    {
+        return CreateErrorResponse(TEXT("Missing 'property_value' parameter"));
+    }
+
+    // Find the actor (might be by label or name)
+    AActor* TargetActor = nullptr;
+    for (TActorIterator<AActor> It(GEditor->GetEditorWorldContext().World()); It; ++It)
+    {
+        if (It->GetActorLabel() == ActorName || It->GetName() == ActorName)
+        {
+            TargetActor = *It;
+            break;
+        }
+    }
+
+    if (!TargetActor)
+    {
+        return CreateErrorResponse(FString::Printf(TEXT("Actor not found: %s"), *ActorName));
+    }
+
+    TSharedPtr<FJsonValue> PropertyValue = Params->Values.FindRef(TEXT("property_value"));
+    FString ErrorMessage;
+    if (SetObjectProperty(TargetActor, PropertyName, PropertyValue, ErrorMessage))
+    {
+        TargetActor->PostEditChange();
+        TargetActor->MarkPackageDirty();
+        
+        TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+        ResultObj->SetStringField(TEXT("actor"), ActorName);
+        ResultObj->SetStringField(TEXT("property"), PropertyName);
+        ResultObj->SetBoolField(TEXT("success"), true);
+        return ResultObj;
+    }
+
+    return CreateErrorResponse(ErrorMessage);
+}

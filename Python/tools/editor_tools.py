@@ -366,4 +366,66 @@ def register_editor_tools(mcp: FastMCP):
             logger.error(error_msg)
             return {"success": False, "message": error_msg}
 
+    @mcp.tool()
+    def import_asset(
+        ctx: Context,
+        file_path: str,
+        destination_path: str,
+        import_type: str = "auto"
+    ) -> Dict[str, Any]:
+        """
+        Import a 3D asset (FBX, OBJ, GLB) into Unreal Engine.
+        
+        Args:
+            file_path: Full path to the file to import (e.g., "C:/Models/Enemy.fbx")
+            destination_path: Destination path in Content Browser (e.g., "/Game/Characters/Enemies")
+            import_type: Type of asset - "auto", "StaticMesh", or "SkeletalMesh" (default: "auto")
+            
+        Returns:
+            Dict containing the imported asset path and metadata
+        """
+        from unreal_mcp_server import get_unreal_connection
+        import os
+        
+        try:
+            # Validate file exists
+            if not os.path.exists(file_path):
+                error_msg = f"File not found: {file_path}"
+                logger.error(error_msg)
+                return {"success": False, "message": error_msg}
+            
+            # Validate file extension
+            valid_extensions = ['.fbx', '.obj', '.glb', '.gltf']
+            file_ext = os.path.splitext(file_path)[1].lower()
+            if file_ext not in valid_extensions:
+                error_msg = f"Unsupported file format: {file_ext}. Supported: {', '.join(valid_extensions)}"
+                logger.error(error_msg)
+                return {"success": False, "message": error_msg}
+            
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+            
+            params = {
+                "file_path": file_path,
+                "destination_path": destination_path,
+                "import_type": import_type
+            }
+            
+            logger.info(f"Importing asset from {file_path} to {destination_path}")
+            response = unreal.send_command("import_asset", params)
+            
+            if not response:
+                logger.error("No response from Unreal Engine")
+                return {"success": False, "message": "No response from Unreal Engine"}
+            
+            logger.info(f"Asset import response: {response}")
+            return response
+            
+        except Exception as e:
+            error_msg = f"Error importing asset: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
     logger.info("Editor tools registered successfully")

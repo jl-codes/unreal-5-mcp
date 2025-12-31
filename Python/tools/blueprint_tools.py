@@ -251,6 +251,59 @@ def register_blueprint_tools(mcp: FastMCP):
             return {"success": False, "message": error_msg}
     
     @mcp.tool()
+    def set_skeletal_mesh_properties(
+        ctx: Context,
+        blueprint_name: str,
+        component_name: str,
+        skeletal_mesh: str,
+        animation_mode: str = "Blueprint",
+        anim_class: str = ""
+    ) -> Dict[str, Any]:
+        """
+        Set skeletal mesh properties on a SkeletalMeshComponent.
+        
+        Args:
+            blueprint_name: Name of the target Blueprint
+            component_name: Name of the SkeletalMeshComponent
+            skeletal_mesh: Path to the skeletal mesh asset
+            animation_mode: Animation mode ("Blueprint" or "Asset")
+            anim_class: Path to the animation class (if animation_mode is "Blueprint")
+            
+        Returns:
+            Response indicating success or failure
+        """
+        from unreal_mcp_server import get_unreal_connection
+        
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+            
+            params = {
+                "blueprint_name": blueprint_name,
+                "component_name": component_name,
+                "skeletal_mesh": skeletal_mesh,
+                "animation_mode": animation_mode,
+                "anim_class": anim_class
+            }
+            
+            logger.info(f"Setting skeletal mesh properties with params: {params}")
+            response = unreal.send_command("set_skeletal_mesh_properties", params)
+            
+            if not response:
+                logger.error("No response from Unreal Engine")
+                return {"success": False, "message": "No response from Unreal Engine"}
+            
+            logger.info(f"Set skeletal mesh properties response: {response}")
+            return response
+            
+        except Exception as e:
+            error_msg = f"Error setting skeletal mesh properties: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
     def compile_blueprint(
         ctx: Context,
         blueprint_name: str
@@ -330,16 +383,81 @@ def register_blueprint_tools(mcp: FastMCP):
             logger.error(error_msg)
             return {"success": False, "message": error_msg}
 
-    # @mcp.tool() commented out, just use set_component_property instead
+    @mcp.tool()
     def set_pawn_properties(
         ctx: Context,
         blueprint_name: str,
         auto_possess_player: str = "",
+        auto_possess_ai: str = "",
         use_controller_rotation_yaw: bool = None,
         use_controller_rotation_pitch: bool = None,
         use_controller_rotation_roll: bool = None,
         can_be_damaged: bool = None
     ) -> Dict[str, Any]:
+        """
+        Set common Pawn properties on a Blueprint.
+        This is a utility function that sets multiple pawn-related properties at once.
+        
+        Args:
+            blueprint_name: Name of the target Blueprint (must be a Pawn or Character)
+            auto_possess_player: Auto possess player setting (None, "Disabled", "Player0", "Player1", etc.)
+            auto_possess_ai: Auto possess AI setting (None, "Disabled", "PlacedInWorld", "Spawned", "PlacedInWorldOrSpawned")
+            use_controller_rotation_yaw: Whether the pawn should use the controller's yaw rotation
+            use_controller_rotation_pitch: Whether the pawn should use the controller's pitch rotation
+            use_controller_rotation_roll: Whether the pawn should use the controller's roll rotation
+            can_be_damaged: Whether the pawn can be damaged
+            
+        Returns:
+            Response indicating success or failure with detailed results for each property
+        """
+        from unreal_mcp_server import get_unreal_connection
+        
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+            
+            # Define the properties to set
+            properties = {}
+            if auto_possess_player and auto_possess_player != "":
+                properties["auto_possess_player"] = auto_possess_player
+            if auto_possess_ai and auto_possess_ai != "":
+                properties["auto_possess_ai"] = auto_possess_ai
+            
+            # Only include boolean properties if they were explicitly set
+            if use_controller_rotation_yaw is not None:
+                properties["bUseControllerRotationYaw"] = use_controller_rotation_yaw
+            if use_controller_rotation_pitch is not None:
+                properties["bUseControllerRotationPitch"] = use_controller_rotation_pitch
+            if use_controller_rotation_roll is not None:
+                properties["bUseControllerRotationRoll"] = use_controller_rotation_roll
+            if can_be_damaged is not None:
+                properties["bCanBeDamaged"] = can_be_damaged
+                
+            if not properties:
+                logger.warning("No properties specified to set")
+                return {"success": True, "message": "No properties specified to set", "results": {}}
+            
+            # Set each property using the C++ side set_pawn_properties handler
+            params = {
+                "blueprint_name": blueprint_name
+            }
+            params.update(properties)
+            
+            logger.info(f"Setting pawn properties with params: {params}")
+            response = unreal.send_command("set_pawn_properties", params)
+            
+            if not response:
+                logger.error("No response from Unreal Engine")
+                return {"success": False, "message": "No response from Unreal Engine"}
+            
+            return response
+            
+        except Exception as e:
+            error_msg = f"Error setting pawn properties: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
         """
         Set common Pawn properties on a Blueprint.
         This is a utility function that sets multiple pawn-related properties at once.
@@ -417,4 +535,4 @@ def register_blueprint_tools(mcp: FastMCP):
             logger.error(error_msg)
             return {"success": False, "message": error_msg}
     
-    logger.info("Blueprint tools registered successfully") 
+    logger.info("Blueprint tools registered successfully")
